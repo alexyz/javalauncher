@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -9,9 +9,15 @@ namespace test
 {
     class Test
     {
-        //LAUNCHER_API const wchar_t *LaunchImpl(WCHAR *jredir, WCHAR **jreargs, WCHAR *mainclassname, WCHAR **mainargs);
+
         [DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
-        extern static IntPtr LaunchImpl(IntPtr dir, IntPtr[] jreargs, IntPtr mainclassname, IntPtr[] mainargs, int log);
+        extern static IntPtr Create(IntPtr dir, IntPtr[] jreargs, int log);
+		
+		[DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
+        extern static IntPtr Run(IntPtr mainclassname, IntPtr[] mainargs, int log);
+		
+		[DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
+        extern static IntPtr Destroy(int log);
 
         public static IntPtr[] StringArrayToBSTRArray(string[] a)
         {
@@ -35,17 +41,29 @@ namespace test
             }
         }
 
-        public static string Launch (string jredir, string[] jreargs, string mainclassname, string[] mainargs, bool log)
+		public static string Create2 (string jredir, string[] jreargs, bool log)
         {
             IntPtr a = Marshal.StringToBSTR(jredir);
             IntPtr[] b = StringArrayToBSTRArray(jreargs);
-            IntPtr c = Marshal.StringToBSTR(mainclassname);
-            IntPtr[] d = StringArrayToBSTRArray(mainargs);
-            IntPtr v = LaunchImpl(a, b, c, d, log ? 1 : 0);
+            IntPtr v = Create(a, b, log ? 1 : 0);
             Marshal.FreeBSTR(a);
             FreeBSTRArray(b);
+            return v != null && v != IntPtr.Zero ? Marshal.PtrToStringBSTR(v) : null;
+        }
+		
+		public static string Run2 (string mainclassname, string[] mainargs, bool log)
+        {
+            IntPtr c = Marshal.StringToBSTR(mainclassname);
+            IntPtr[] d = StringArrayToBSTRArray(mainargs);
+            IntPtr v = Run(c, d, log ? 1 : 0);
             Marshal.FreeBSTR(c);
             FreeBSTRArray(d);
+            return v != null && v != IntPtr.Zero ? Marshal.PtrToStringBSTR(v) : null;
+        }
+		
+		public static string Destroy2 (bool log)
+        {
+            IntPtr v = Destroy(log ? 1 : 0);
             return v != null && v != IntPtr.Zero ? Marshal.PtrToStringBSTR(v) : null;
         }
 
@@ -74,12 +92,26 @@ namespace test
                 }
             }
 
-            string v1 = Launch(dir, options.ToArray(), mainclassname, mainargs.ToArray(), true);
-            Console.WriteLine("Main: test1 = " + v1);
+            string e = Create2(dir, options.ToArray(), true);
+			if (e != null) {
+				Console.WriteLine("Main: create = " + e);
+				return;
+			}
 
-            string v2 = Launch(dir, options.ToArray(), mainclassname, mainargs.ToArray(), true);
-            Console.WriteLine("Main: test2 = " + v2);
+			for (int n = 0; n < 2; n++) {
+				e = Run2(mainclassname, mainargs.ToArray(), true);
+				if (e != null) {
+					Console.WriteLine("Main: run = " + e);
+					return;
+				}
+			}
 
+			e = Destroy2(true);
+			if (e != null) {
+				Console.WriteLine("Main: destroy = " + e);
+				return;
+			}
+				
             Console.WriteLine("Main exit");
         }
 

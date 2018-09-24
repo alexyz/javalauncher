@@ -9,6 +9,9 @@
 #define LAUNCHER_EXPORTS
 #include "launcher.h"
 
+JavaVM *jvm = 0;
+JNIEnv *env = 0;
+
 // jint JNI_CreateJavaVM(JavaVM **p_vm, void **p_env, void *vm_args);
 typedef jint(__cdecl CREATEVM)(JavaVM **p_vm, JNIEnv **p_env, JavaVMInitArgs *vm_args);
 
@@ -21,11 +24,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 
 char* tochar(WCHAR *ws) {
 	int slen = wcslen(ws);
-	int ulen = WideCharToMultiByte(CP_UTF8, 0, ws, slen, NULL, 0,    NULL, NULL);
+	int ulen = WideCharToMultiByte(CP_UTF8, 0, ws, slen, NULL, 0,    NULL, NULL) + 1;
 	char *us = new char[ulen];
-	WideCharToMultiByte(CP_UTF8, 0, ws, -1,   us,   ulen, NULL, NULL);
-	//printf("tochar: slen=%d ulen=%d vlen=%d strlen(us)=%d\n", slen, ulen, vlen, strlen(us));
-	//tochar: slen=25 ulen=25 vlen=0 strlen(us)=25
+	int vlen = WideCharToMultiByte(CP_UTF8, 0, ws, -1,   us,   ulen, NULL, NULL);
+	us[ulen-1] = 0;
+	//wprintf(L"tochar: slen=%d ulen=%d vlen=%d strlen(us)=%d\n", slen, ulen, vlen, strlen(us));
 	return us;
 }
 
@@ -42,18 +45,22 @@ int argcount(WCHAR **a) {
 }
 
 // As of JDK/JRE 1.2 , creation of multiple VMs in a single process is not supported.
-LAUNCHER_API const WCHAR *LaunchImpl(WCHAR *jredir, WCHAR **jreargs, WCHAR *mainclassname, WCHAR **mainargs, int log) {
+LAUNCHER_API const WCHAR *Create (WCHAR *jredir, WCHAR **jreargs, int log) {
+	
+	if (jvm) {
+		return L"already created";
+	}
 
-	if (isempty(jredir) || !jreargs || isempty(mainclassname) || !mainargs) {
-		return L"launchimpl: invalid arguments";
+	if (isempty(jredir) || !jreargs || argcount(jreargs) == 0) {
+		return L"invalid arguments";
 	}
 
 	DWORD jredirattr = GetFileAttributes(jredir);
 	if (jredirattr == INVALID_FILE_ATTRIBUTES || !(jredirattr & FILE_ATTRIBUTE_DIRECTORY)) {
 		if (log) {
-			wprintf(L"launchimpl: GetFileAttributes(%s): %x\n", jredir, jredirattr);
+			wprintf(L"GetFileAttributes(%s): %x\n", jredir, jredirattr);
 		}
-		return L"launchimpl: jredir is not a directory";
+		return L"jredir is not a directory";
 	}
 
 	WCHAR dlldir[MAX_PATH];
@@ -62,9 +69,9 @@ LAUNCHER_API const WCHAR *LaunchImpl(WCHAR *jredir, WCHAR **jreargs, WCHAR *main
 	if (!set) {
 		if (log) {
 			int e = GetLastError();
-			wprintf(L"launchimpl: SetDllDirectory(%s): %d\n", dlldir, e);
+			wprintf(L"SetDllDirectory(%s): %d\n", dlldir, e);
 		}
-		return L"launchimpl: could not set dll directory";
+		return L"could not set dll directory";
 	}
 
 	WCHAR *jvmfile = L"server\\jvm.dll";
@@ -72,25 +79,25 @@ LAUNCHER_API const WCHAR *LaunchImpl(WCHAR *jredir, WCHAR **jreargs, WCHAR *main
 	if (!jvmdll) {
 		if (log) {
 			int e = GetLastError();
-			wprintf(L"launchimpl: LoadLibrary(%s): %d\n", jvmfile, e);
+			wprintf(L"LoadLibrary(%s): %d\n", jvmfile, e);
 		}
-		return L"launchimpl: could not load jvm.dll (32/64 bit mismatch?)";
+		return L"could not load jvm.dll (32/64 bit mismatch?)";
 	}
 
 	DEFAULTVM *defaultvm = (DEFAULTVM*)GetProcAddress(jvmdll, "JNI_GetDefaultJavaVMInitArgs");
 	if (!defaultvm) {
 		if (log) {
-			wprintf(L"launchimpl: GetProcAddress: %d\n", GetLastError());
+			wprintf(L"GetProcAddress: %d\n", GetLastError());
 		}
-		return L"launchimpl: could not find default function";
+		return L"could not find default function";
 	}
 
 	CREATEVM *createvm = (CREATEVM*)GetProcAddress(jvmdll, "JNI_CreateJavaVM");
 	if (!createvm) {
 		if (log) {
-			wprintf(L"launchimpl: GetProcAddress: %d\n", GetLastError());
+			wprintf(L"GetProcAddress: %d\n", GetLastError());
 		}
-		return L"launchimpl: could not find create function";
+		return L"could not find create function";
 	}
 
 	JavaVMInitArgs init;
@@ -99,9 +106,9 @@ LAUNCHER_API const WCHAR *LaunchImpl(WCHAR *jredir, WCHAR **jreargs, WCHAR *main
 	int defok = defaultvm(&init);
 	if (defok != JNI_OK) {
 		if (log) {
-			wprintf(L"launchimpl: GetDefaultJavaVMInitArgs: %d\n", defok);
+			wprintf(L"GetDefaultJavaVMInitArgs: %d\n", defok);
 		}
-		return L"launchimpl: could not default jvm";
+		return L"could not default jvm";
 	}
 
 	init.nOptions = argcount(jreargs);
@@ -113,8 +120,7 @@ LAUNCHER_API const WCHAR *LaunchImpl(WCHAR *jredir, WCHAR **jreargs, WCHAR *main
 
 	init.ignoreUnrecognized = false;
 
-	JavaVM *jvm;
-	JNIEnv *env;
+	
 	int createok = createvm(&jvm, &env, &init);
 
 	for (int n = 0; n < init.nOptions; n++) {
@@ -125,12 +131,28 @@ LAUNCHER_API const WCHAR *LaunchImpl(WCHAR *jredir, WCHAR **jreargs, WCHAR *main
 
 	if (createok != JNI_OK) {
 		if (log) {
-			wprintf(L"launchimpl: CreateJavaVM: %d\n", createok);
+			wprintf(L"CreateJavaVM: %d\n", createok);
 		}
-		return L"launchimpl: could not create jvm";
+		return L"could not create jvm";
+	}
+	
+	return 0;
+}
+
+LAUNCHER_API const WCHAR *Run(WCHAR *mainclassname, WCHAR **mainargs, int log) {
+	
+	if (!jvm) {
+		return L"not created";
 	}
 
+	if (isempty(mainclassname) || !mainargs) {
+		return L"invalid arguments";
+	}
+	
 	_jclass *stringclass = env->FindClass("java/lang/String");
+	if (!stringclass) {
+		return L"could not find string class";
+	}
 
 	int mainargscount = argcount(mainargs);
 
@@ -139,7 +161,7 @@ LAUNCHER_API const WCHAR *LaunchImpl(WCHAR *jredir, WCHAR **jreargs, WCHAR *main
 	for (int n = 0; n < mainargscount; n++) {
 		//wprintf(L"mainargs[%d]=%s\n", n, mainargs[n]);
 		char *t = tochar(mainargs[n]);
-		//printf("t=%s\n", t);
+		//printf("  utf=%s\n", t);
 		env->SetObjectArrayElement(jmainargs, n, env->NewStringUTF(t));
 		delete t;
 	}
@@ -153,32 +175,39 @@ LAUNCHER_API const WCHAR *LaunchImpl(WCHAR *jredir, WCHAR **jreargs, WCHAR *main
 
 	if (!mainclass) {
 		if (log) {
-			wprintf(L"launchimpl: could not find main class %s\n", mainclassname);
+			wprintf(L"could not find main class %s\n", mainclassname);
 		}
-		return L"launchimpl: could not find main class";
+		return L"could not find main class";
 	}
 
 	_jmethodID *mainmethod = env->GetStaticMethodID(mainclass, "main", "([Ljava/lang/String;)V");
 
 	if (!mainmethod) {
 		if (log) {
-			wprintf(L"launchimpl: could not find main method in %s\n", mainclassname);
+			wprintf(L"could not find main method in %s\n", mainclassname);
 		}
-		return L"launchimpl: could not find main method";
+		return L"could not find main method";
 	}
 
 	env->CallStaticVoidMethod(mainclass, mainmethod, jmainargs);
+	
+	return 0;
+}
+
+LAUNCHER_API const WCHAR *Destroy (int log) {
+
+	if (!jvm) {
+		return L"not created";
+	}
 
 	int destroyok = jvm->DestroyJavaVM();
 
 	if (destroyok != JNI_OK) {
 		if (log) {
-			wprintf(L"launchimpl: destroy: %d\n", destroyok);
+			wprintf(L"destroy: %d\n", destroyok);
 		}
-		return L"launchimpl: could not destroy jvm";
+		return L"could not destroy jvm";
 	}
 
 	return NULL;
 }
-
-
