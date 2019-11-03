@@ -9,8 +9,12 @@
 #define LAUNCHER_EXPORTS
 #include "launcher.h"
 
-JavaVM *jvm = 0;
-JNIEnv *env = 0;
+static JavaVM *jvm = 0;
+static JNIEnv *env = 0;
+static int log = 0;
+
+#define LOG(...) if (log) { wprintf(__VA_ARGS__); }
+#define E GetLastError()
 
 // jint JNI_CreateJavaVM(JavaVM **p_vm, void **p_env, void *vm_args);
 typedef jint(__cdecl CREATEVM)(JavaVM **p_vm, JNIEnv **p_env, JavaVMInitArgs *vm_args);
@@ -22,7 +26,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
     return TRUE;
 }
 
-char* tochar(WCHAR *ws) {
+static LPSTR wstrToStr(LPWSTR ws) {
 	int slen = wcslen(ws);
 	int ulen = WideCharToMultiByte(CP_UTF8, 0, ws, slen, NULL, 0,    NULL, NULL) + 1;
 	char *us = new char[ulen];
@@ -32,72 +36,76 @@ char* tochar(WCHAR *ws) {
 	return us;
 }
 
-BOOL isempty(WCHAR *s) {
+static BOOL wstrIsEmpty(LPWSTR s) {
 	return !s || wcslen(s) == 0;
 }
 
-int argcount(WCHAR **a) {
-	int c = 0;
-	for (int n = 0; a[n]; n++) {
-		c++;
+static int wstrArrayCount(LPWSTR *a) {
+	if (a) {
+		int c = 0;
+		for (int n = 0; a[n]; n++) {
+			c++;
+		}
+		return c;
+	} else {
+		return -1;
 	}
-	return c;
+}
+
+LAUNCHER_API void AlexSetLog (int l) {
+	log = l;
+	LOG(L"log: %d\n", log);
 }
 
 // As of JDK/JRE 1.2 , creation of multiple VMs in a single process is not supported.
-LAUNCHER_API const WCHAR *Create (WCHAR *jredir, WCHAR **jreargs, int log) {
+LAUNCHER_API int AlexCreateVm (LPWSTR jredir, LPWSTR* jreargs) {
 	
 	if (jvm) {
-		return L"already created";
+		LOG(L"create: jvm already exists\n")
+		return -10;
 	}
 
-	if (isempty(jredir) || !jreargs || argcount(jreargs) == 0) {
-		return L"invalid arguments";
+	if (wstrIsEmpty(jredir)) {
+		LOG(L"create: invalid jre dir\n")
+		return -20;
+	}
+	
+	if (wstrArrayCount(jreargs) <= 0) {
+		LOG(L"create: invalid jre args\n");
+		return -30;
 	}
 
 	DWORD jredirattr = GetFileAttributes(jredir);
 	if (jredirattr == INVALID_FILE_ATTRIBUTES || !(jredirattr & FILE_ATTRIBUTE_DIRECTORY)) {
-		if (log) {
-			wprintf(L"GetFileAttributes(%s): %x\n", jredir, jredirattr);
-		}
-		return L"jredir is not a directory";
+		LOG(L"create: could not get file attr %s: %x\n", jredir, jredirattr);
+		return -40;
 	}
 
 	WCHAR dlldir[MAX_PATH];
 	swprintf(dlldir, MAX_PATH, L"%s\\bin", jredir);
 	BOOL set = SetDllDirectory(dlldir);
 	if (!set) {
-		if (log) {
-			int e = GetLastError();
-			wprintf(L"SetDllDirectory(%s): %d\n", dlldir, e);
-		}
-		return L"could not set dll directory";
+		LOG(L"create: could not set dll dir %s: %d\n", dlldir, E);
+		return -50;
 	}
 
 	WCHAR *jvmfile = L"server\\jvm.dll";
 	HMODULE jvmdll = LoadLibrary(jvmfile);
 	if (!jvmdll) {
-		if (log) {
-			int e = GetLastError();
-			wprintf(L"LoadLibrary(%s): %d\n", jvmfile, e);
-		}
-		return L"could not load jvm.dll (32/64 bit mismatch?)";
+		LOG(L"create: could not load jvm (32/64 bit mismatch?) %s: %d\n", jvmfile, E);
+		return -60;
 	}
 
 	DEFAULTVM *defaultvm = (DEFAULTVM*)GetProcAddress(jvmdll, "JNI_GetDefaultJavaVMInitArgs");
 	if (!defaultvm) {
-		if (log) {
-			wprintf(L"GetProcAddress: %d\n", GetLastError());
-		}
-		return L"could not find default function";
+		LOG(L"create: could not get default vm address: %d\n", E);
+		return -70;
 	}
 
 	CREATEVM *createvm = (CREATEVM*)GetProcAddress(jvmdll, "JNI_CreateJavaVM");
 	if (!createvm) {
-		if (log) {
-			wprintf(L"GetProcAddress: %d\n", GetLastError());
-		}
-		return L"could not find create function";
+		LOG(L"create: could not get create vm address: %d\n", E);
+		return -80;
 	}
 
 	JavaVMInitArgs init;
@@ -105,109 +113,107 @@ LAUNCHER_API const WCHAR *Create (WCHAR *jredir, WCHAR **jreargs, int log) {
 
 	int defok = defaultvm(&init);
 	if (defok != JNI_OK) {
-		if (log) {
-			wprintf(L"GetDefaultJavaVMInitArgs: %d\n", defok);
-		}
-		return L"could not default jvm";
+		LOG(L"create: could not default vm: %d\n", defok);
+		return -90;
 	}
 
-	init.nOptions = argcount(jreargs);
-
+	init.nOptions = wstrArrayCount(jreargs);
 	init.options = new JavaVMOption[init.nOptions];
-	for (int n = 0; n < init.nOptions; n++) {
-		init.options[n].optionString = tochar(jreargs[n]);
-	}
-
 	init.ignoreUnrecognized = false;
-
+	for (int n = 0; n < init.nOptions; n++) {
+		init.options[n].optionString = wstrToStr(jreargs[n]);
+	}
 	
 	int createok = createvm(&jvm, &env, &init);
 
 	for (int n = 0; n < init.nOptions; n++) {
 		delete init.options[n].optionString;
 	}
-
 	delete init.options;
 
-	if (createok != JNI_OK) {
-		if (log) {
-			wprintf(L"CreateJavaVM: %d\n", createok);
-		}
-		return L"could not create jvm";
+	if (createok == JNI_OK) {
+		LOG(L"create: ok\n");
+		return 0;
+		
+	} else {
+		LOG(L"create: could not create jvm: %d\n", createok);
+		return -100;
 	}
 	
-	return 0;
 }
 
-LAUNCHER_API const WCHAR *Run(WCHAR *mainclassname, WCHAR **mainargs, int log) {
+// this may return quickly if main spawns other threads and exits
+// this may never return if jvm calls System.exit
+LAUNCHER_API int AlexRunMain(LPWSTR mainclassname, LPWSTR* mainargs) {
 	
 	if (!jvm) {
-		return L"not created";
+		LOG(L"run: not created\n");
+		return -1;
 	}
 
-	if (isempty(mainclassname) || !mainargs) {
-		return L"invalid arguments";
+	if (wstrIsEmpty(mainclassname) || !mainargs) {
+		LOG(L"run: invalid arguments\n");
+		return -2;
 	}
 	
 	_jclass *stringclass = env->FindClass("java/lang/String");
 	if (!stringclass) {
-		return L"could not find string class";
+		LOG(L"run: could not find string class\n");
+		return -3;
 	}
 
-	int mainargscount = argcount(mainargs);
+	int mainargscount = wstrArrayCount(mainargs);
 
 	_jobjectArray *jmainargs = env->NewObjectArray(mainargscount, stringclass, NULL);
 
 	for (int n = 0; n < mainargscount; n++) {
-		//wprintf(L"mainargs[%d]=%s\n", n, mainargs[n]);
-		char *t = tochar(mainargs[n]);
-		//printf("  utf=%s\n", t);
+		char *t = wstrToStr(mainargs[n]);
 		env->SetObjectArrayElement(jmainargs, n, env->NewStringUTF(t));
 		delete t;
 	}
 
 	_jclass *mainclass;
 	{
-		char *t = tochar(mainclassname);
+		char *t = wstrToStr(mainclassname);
 		mainclass = env->FindClass(t);
 		delete t;
 	}
 
 	if (!mainclass) {
-		if (log) {
-			wprintf(L"could not find main class %s\n", mainclassname);
-		}
-		return L"could not find main class";
+		// make sure is separated with /
+		LOG(L"run: could not find main class: %s\n", mainclassname);
+		return -4;
 	}
 
 	_jmethodID *mainmethod = env->GetStaticMethodID(mainclass, "main", "([Ljava/lang/String;)V");
 
 	if (!mainmethod) {
-		if (log) {
-			wprintf(L"could not find main method in %s\n", mainclassname);
-		}
-		return L"could not find main method";
+		LOG(L"run: could not find main method: %s\n", mainclassname);
+		return -5;
 	}
 
 	env->CallStaticVoidMethod(mainclass, mainmethod, jmainargs);
 	
+	LOG(L"run: ok\n");
 	return 0;
 }
 
-LAUNCHER_API const WCHAR *Destroy (int log) {
+// this might never return, if jvm never exits or calls System.exit
+LAUNCHER_API int AlexDestroyVm () {
 
 	if (!jvm) {
-		return L"not created";
+		LOG(L"destroy: not created\n");
+		return -1;
 	}
 
-	int destroyok = jvm->DestroyJavaVM();
-
-	if (destroyok != JNI_OK) {
-		if (log) {
-			wprintf(L"destroy: %d\n", destroyok);
-		}
-		return L"could not destroy jvm";
+	int ok = jvm->DestroyJavaVM();
+	if (ok == JNI_OK) {
+		LOG(L"destroy: ok\n");
+		return 0;
+		
+	} else {
+		LOG(L"destroy: could not destroy: %d\n", ok);
+		return -2;
 	}
-
-	return NULL;
+	
 }

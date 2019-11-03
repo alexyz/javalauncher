@@ -4,115 +4,113 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 
 namespace test
 {
-    class Test
+    public class Test2
     {
+		
+		[DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
+        extern static void AlexSetLog(int log);
 
         [DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
-        extern static IntPtr Create(IntPtr dir, IntPtr[] jreargs, int log);
+        extern static int AlexCreateVm(IntPtr dir, IntPtr[] jreargs);
 		
 		[DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
-        extern static IntPtr Run(IntPtr mainclassname, IntPtr[] mainargs, int log);
+        extern static int AlexRunMain(IntPtr mainclassname, IntPtr[] mainargs);
 		
 		[DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
-        extern static IntPtr Destroy(int log);
+        extern static int AlexDestroyVm();
 
-        public static IntPtr[] StringArrayToBSTRArray(string[] a)
-        {
+        private static IntPtr[] StringArrayToBSTRArray(string[] a) {
             IntPtr[] b = new IntPtr[a.Length + 1];
-            for (int n = 0; n < a.Length; n++)
-            {
+            for (int n = 0; n < a.Length; n++) {
                 b[n] = Marshal.StringToBSTR(a[n]);
             }
             b[b.Length - 1] = IntPtr.Zero;
             return b;
         }
 
-        private static void FreeBSTRArray (IntPtr[] a)
-        {
-            for (int n = 0; n < a.Length; n++)
-            {
-                if (a[n] != null && a[n] != IntPtr.Zero)
-                {
+        private static void FreeBSTRArray (IntPtr[] a) {
+            for (int n = 0; n < a.Length; n++) {
+                if (a[n] != null && a[n] != IntPtr.Zero) {
                     Marshal.FreeBSTR(a[n]);
                 }
             }
         }
+		
+		public static void Log (int log) {
+			AlexSetLog(log);
+		}
 
-		public static string Create2 (string jredir, string[] jreargs, bool log)
-        {
+		public static void Create (string jredir, string[] jreargs) {
             IntPtr a = Marshal.StringToBSTR(jredir);
             IntPtr[] b = StringArrayToBSTRArray(jreargs);
-            IntPtr v = Create(a, b, log ? 1 : 0);
+            int v = AlexCreateVm(a, b);
             Marshal.FreeBSTR(a);
             FreeBSTRArray(b);
-            return v != null && v != IntPtr.Zero ? Marshal.PtrToStringBSTR(v) : null;
+            if (v != 0) {
+				throw new Exception("could not create: " + v);
+			}
         }
 		
-		public static string Run2 (string mainclassname, string[] mainargs, bool log)
-        {
+		public static void RunMain (string mainclassname, string[] mainargs) {
             IntPtr c = Marshal.StringToBSTR(mainclassname);
             IntPtr[] d = StringArrayToBSTRArray(mainargs);
-            IntPtr v = Run(c, d, log ? 1 : 0);
+            int v = AlexRunMain(c, d);
             Marshal.FreeBSTR(c);
             FreeBSTRArray(d);
-            return v != null && v != IntPtr.Zero ? Marshal.PtrToStringBSTR(v) : null;
+            if (v != 0) {
+				throw new Exception("could not run main: " + v);
+			}
         }
 		
-		public static string Destroy2 (bool log)
-        {
-            IntPtr v = Destroy(log ? 1 : 0);
-            return v != null && v != IntPtr.Zero ? Marshal.PtrToStringBSTR(v) : null;
+		public static void Destroy () {
+            int v = AlexDestroyVm();
+            if (v != 0) {
+				throw new Exception("could not run main: " + v);
+			}
         }
+		
+        public static void Main(string[] args) {
+            Console.WriteLine("C# usage: Test <logint> <jvmdir> {-D<jvmopt>} <mainclass> {<mainargs>}");
 
-        static void Main(string[] args)
-        {
-            Console.WriteLine("Main");
-
+			int log = 0;
             string dir = null;
             List<string> options = new List<string>();
             string mainclassname = null;
             List<string> mainargs = new List<string>();
 
             for (int n = 0; n < args.Length; n++) {
-                if (n == 0) {
-                    Console.WriteLine("Main: jvm dir = " + args[n]);
+				if (n == 0) {
+					log = int.Parse(args[n]);
+				} else if (n == 1) {
                     dir = args[n];
                 } else if (args[n].StartsWith("-D")) {
-                    Console.WriteLine("Main: jvm option = " + args[n]);
                     options.Add(args[n]);
                 } else if (mainclassname == null) {
-                    Console.WriteLine("Main: main class = " +  args[n]);
                     mainclassname = args[n];
                 } else {
-                    Console.WriteLine("Main: main class arg = " + args[n]);
                     mainargs.Add(args[n]);
                 }
             }
+			
+			Console.WriteLine("C# log = " + log);
+			Console.WriteLine("C# jvm dir = " + dir);
+			Console.WriteLine("C# jvm args = " + string.Join(", ", options) + " count = " + options.Count());
+			Console.WriteLine("C# main class = " +  mainclassname);
+			Console.WriteLine("C# main arg = " + string.Join(", ", mainargs) + " count = " + mainargs.Count());
 
-            string e = Create2(dir, options.ToArray(), true);
-			if (e != null) {
-				Console.WriteLine("Main: create = " + e);
-				return;
-			}
+			Log(log);
+			
+			Create(dir, options.ToArray());
+			
+			RunMain(mainclassname, mainargs.ToArray());
 
-			for (int n = 0; n < 2; n++) {
-				e = Run2(mainclassname, mainargs.ToArray(), true);
-				if (e != null) {
-					Console.WriteLine("Main: run = " + e);
-					return;
-				}
-			}
-
-			e = Destroy2(true);
-			if (e != null) {
-				Console.WriteLine("Main: destroy = " + e);
-				return;
-			}
+			Destroy();
 				
-            Console.WriteLine("Main exit");
+            Console.WriteLine("C# main exit");
         }
 
     }

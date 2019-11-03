@@ -5,6 +5,7 @@
 #define LAUNCHER_API extern "C" __declspec(dllimport)
 #endif
 
-LAUNCHER_API const wchar_t *Create(WCHAR *jredir, WCHAR **jreargs, int log);
-LAUNCHER_API const wchar_t *Run(WCHAR *mainclassname, WCHAR **mainargs, int log);
-LAUNCHER_API const wchar_t *Destroy(int log);
+LAUNCHER_API void AlexSetLog (int l);
+LAUNCHER_API int AlexCreateVm (LPWSTR jredir, LPWSTR *jreargs);
+LAUNCHER_API int AlexRunMain(LPWSTR mainclassname, LPWSTR *mainargs);
+LAUNCHER_API int AlexDestroyVm ();
