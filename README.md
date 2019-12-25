@@ -3,7 +3,7 @@ A simple Windows library written in C++ to launch a Java virtual machine within 
 Can be called from C++ or C#.
 
 Directories:
-java - test program (Java)
-launcher - DLL source code (C++)
-test - test executable (C++)
-testcs - test executable (C#)
+* java - Java test programs
+* Project1 - C++ DLL
+* Project2 - C# test program
+* Project3 - C++ test program
