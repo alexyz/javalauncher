@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
-using System.Threading;
 
 namespace test
 {
+    /// <summary>
+    /// C:\Dev\test\Project1\Project2\bin\Release>LauncherTest.exe 1 "c:\Dev\openjdk-11+28" C:\Dev\GitHub\javalauncher\java Hello 1 2 3
+    /// </summary>
     public class Test2
     {
 		
@@ -74,8 +74,6 @@ namespace test
         }
 		
         public static void Main(string[] args) {
-            Console.WriteLine("C# usage: Test <logint> <jvmdir> {-D<jvmopt>} <mainclass> {<mainargs>}");
-
 			int log = 0;
             string dir = null;
             List<string> options = new List<string>();
@@ -83,34 +81,38 @@ namespace test
             List<string> mainargs = new List<string>();
 
             for (int n = 0; n < args.Length; n++) {
-				if (n == 0) {
-					log = int.Parse(args[n]);
-				} else if (n == 1) {
+                if (n == 0) {
+                    log = int.Parse(args[n]);
+                } else if (n == 1) {
                     dir = args[n];
+                } else if (n == 2) {
+                    options.Add("-Djava.class.path=" + args[n]);
                 } else if (args[n].StartsWith("-D")) {
                     options.Add(args[n]);
                 } else if (mainclassname == null) {
-                    mainclassname = args[n];
+                    mainclassname = args[n].Replace(".", "/");
                 } else {
                     mainargs.Add(args[n]);
                 }
             }
 			
-			Console.WriteLine("C# log = " + log);
-			Console.WriteLine("C# jvm dir = " + dir);
-			Console.WriteLine("C# jvm args = " + string.Join(", ", options) + " count = " + options.Count());
-			Console.WriteLine("C# main class = " +  mainclassname);
-			Console.WriteLine("C# main arg = " + string.Join(", ", mainargs) + " count = " + mainargs.Count());
+			Console.WriteLine("log = " + log);
+			Console.WriteLine("jvmdir = " + dir);
+			Console.WriteLine("jvmargs = " + string.Join(", ", options) + " count = " + options.Count());
+			Console.WriteLine("mainclass = " +  mainclassname);
+			Console.WriteLine("mainargs = " + string.Join(", ", mainargs) + " count = " + mainargs.Count());
 
-			Log(log);
-			
-			Create(dir, options.ToArray());
-			
-			RunMain(mainclassname, mainargs.ToArray());
+            if (dir != null && options.Count > 0 && mainclassname != null) {
+                Log(log);
+                Create(dir, options.ToArray());
+                RunMain(mainclassname, mainargs.ToArray());
+                // wait for all threads to exit
+                Destroy();
 
-			Destroy();
-				
-            Console.WriteLine("C# main exit");
+            } else {
+                Console.WriteLine("Usage: LauncherTest <log> <jvmdir> <classpath> {-D<jvmarg>} <mainclass> {<mainarg>}");
+            }
+
         }
 
     }

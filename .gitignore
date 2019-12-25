@@ -1,6 +1,5 @@
 *.class
-*.dll
-*.exp
-*.obj
-*.exe
-*.lib
+.vs
+Debug
+x64
+Release
