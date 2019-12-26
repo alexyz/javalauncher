@@ -1,119 +1,111 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Pipes;
 using System.Linq;
-using System.Runtime.InteropServices;
+using System.Threading;
 
-namespace test
+namespace JavaLauncher.Test
 {
     /// <summary>
-    /// C:\Dev\test\Project1\Project2\bin\Release>LauncherTest.exe 1 "c:\Dev\openjdk-11+28" C:\Dev\GitHub\javalauncher\java Hello 1 2 3
+    /// Project2\bin\Release\LauncherTestCs.exe -log=1 "c:\Dev\openjdk-11+28" java Hello 1 2 3
+    /// Project2\bin\Release\LauncherTestCs.exe -log=1 -pipe=Meow "c:\Dev\openjdk-11+28" java HelloPipe Meow
     /// </summary>
-    public class Test2
+    public class Test
     {
-		
-		[DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
-        extern static void AlexSetLog(int log);
 
-        [DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
-        extern static int AlexCreateVm(IntPtr dir, IntPtr[] jreargs);
-		
-		[DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
-        extern static int AlexRunMain(IntPtr mainclassname, IntPtr[] mainargs);
-		
-		[DllImport("launcher.dll", CallingConvention = CallingConvention.Cdecl)]
-        extern static int AlexDestroyVm();
-
-        private static IntPtr[] StringArrayToBSTRArray(string[] a) {
-            IntPtr[] b = new IntPtr[a.Length + 1];
-            for (int n = 0; n < a.Length; n++) {
-                b[n] = Marshal.StringToBSTR(a[n]);
-            }
-            b[b.Length - 1] = IntPtr.Zero;
-            return b;
-        }
-
-        private static void FreeBSTRArray (IntPtr[] a) {
-            for (int n = 0; n < a.Length; n++) {
-                if (a[n] != null && a[n] != IntPtr.Zero) {
-                    Marshal.FreeBSTR(a[n]);
-                }
-            }
-        }
-		
-		public static void Log (int log) {
-			AlexSetLog(log);
-		}
-
-		public static void Create (string jredir, string[] jreargs) {
-            IntPtr a = Marshal.StringToBSTR(jredir);
-            IntPtr[] b = StringArrayToBSTRArray(jreargs);
-            int v = AlexCreateVm(a, b);
-            Marshal.FreeBSTR(a);
-            FreeBSTRArray(b);
-            if (v != 0) {
-				throw new Exception("could not create: " + v);
-			}
-        }
-		
-		public static void RunMain (string mainclassname, string[] mainargs) {
-            IntPtr c = Marshal.StringToBSTR(mainclassname);
-            IntPtr[] d = StringArrayToBSTRArray(mainargs);
-            int v = AlexRunMain(c, d);
-            Marshal.FreeBSTR(c);
-            FreeBSTRArray(d);
-            if (v != 0) {
-				throw new Exception("could not run main: " + v);
-			}
-        }
-		
-		public static void Destroy () {
-            int v = AlexDestroyVm();
-            if (v != 0) {
-				throw new Exception("could not run main: " + v);
-			}
-        }
-		
         public static void Main(string[] args) {
-			int log = 0;
-            string dir = null;
-            List<string> options = new List<string>();
+            WriteLine("Usage: LauncherTest [-log={0,1}] [-pipe=<name>] [-D<jvmarg>]... <jvmdir> <classpath> <mainclass> [<mainarg>]...");
+
+            int log = 0;
+            string jvmdir = null;
+            List<string> jvmopts = new List<string>();
             string mainclassname = null;
             List<string> mainargs = new List<string>();
+            string pipe = null;
+            bool cp = false;
 
             for (int n = 0; n < args.Length; n++) {
-                if (n == 0) {
-                    log = int.Parse(args[n]);
-                } else if (n == 1) {
-                    dir = args[n];
-                } else if (n == 2) {
-                    options.Add("-Djava.class.path=" + args[n]);
-                } else if (args[n].StartsWith("-D")) {
-                    options.Add(args[n]);
-                } else if (mainclassname == null) {
+                string a = args[n];
+                if (a.StartsWith("-log=")) {
+                    log = int.Parse(a.Substring(5));
+                }
+                else if (a.StartsWith("-pipe=")) {
+                    pipe = a.Substring(6);
+                }
+                else if (args[n].StartsWith("-D")) {
+                    jvmopts.Add(args[n]);
+                }
+                else if (jvmdir == null) {
+                    jvmdir = a;
+                }
+                else if (!cp) {
+                    jvmopts.Add("-Djava.class.path=" + args[n]);
+                    cp = true;
+                }
+                else if (mainclassname == null) {
                     mainclassname = args[n].Replace(".", "/");
-                } else {
+                } 
+                else {
                     mainargs.Add(args[n]);
                 }
             }
 			
-			Console.WriteLine("log = " + log);
-			Console.WriteLine("jvmdir = " + dir);
-			Console.WriteLine("jvmargs = " + string.Join(", ", options) + " count = " + options.Count());
-			Console.WriteLine("mainclass = " +  mainclassname);
-			Console.WriteLine("mainargs = " + string.Join(", ", mainargs) + " count = " + mainargs.Count());
+			WriteLine("log = " + log);
+            WriteLine("pipe = " + pipe);
+            WriteLine("jvmdir = " + jvmdir);
+			WriteLine("jvmargs = " + string.Join(", ", jvmopts) + " count = " + jvmopts.Count());
+			WriteLine("mainclass = " +  mainclassname);
+			WriteLine("mainargs = " + string.Join(", ", mainargs) + " count = " + mainargs.Count());
 
-            if (dir != null && options.Count > 0 && mainclassname != null) {
-                Log(log);
-                Create(dir, options.ToArray());
-                RunMain(mainclassname, mainargs.ToArray());
+            if (jvmdir != null && jvmopts.Count > 0 && mainclassname != null) {
+                if (pipe != null) {
+                    Thread t = new Thread(() => PipeStuff(pipe));
+                    t.Start();
+                }
+                WriteLine("set log");
+                LauncherCs.Log(log);
+                WriteLine("create vm");
+                LauncherCs.Create(jvmdir, jvmopts.ToArray());
+                WriteLine("run main");
+                LauncherCs.RunMain(mainclassname, mainargs.ToArray());
                 // wait for all threads to exit
-                Destroy();
+                WriteLine("destroy");
+                LauncherCs.Destroy();
+                WriteLine("exiting");
 
             } else {
-                Console.WriteLine("Usage: LauncherTest <log> <jvmdir> <classpath> {-D<jvmarg>} <mainclass> {<mainarg>}");
+                throw new Exception("insufficient arguments");
             }
-
         }
 
+        private static void PipeStuff(string name) {
+            WriteLine("opening pipe " + name);
+            using (NamedPipeServerStream s = new NamedPipeServerStream(name, PipeDirection.InOut)) {
+                WriteLine("wait for pipe connection");
+                s.WaitForConnection();
+                WriteLine("pipe connected");
+                using (StreamReader sr = new StreamReader(s)) {
+                    using (StreamWriter sw = new StreamWriter(s)) {
+                        while (true) {
+                            string l = sr.ReadLine();
+                            WriteLine("read from pipe: " + l);
+                            if (l != null) {
+                                WriteLine("write to pipe: " + l.ToUpper());
+                                sw.WriteLine(l.ToUpper());
+                                sw.Flush();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+                WriteLine("closing pipe " + name);
+            }
+        }
+
+        private static void WriteLine(string a) {
+            Console.WriteLine("[C#] {0}", a);
+        }
     }
 }
